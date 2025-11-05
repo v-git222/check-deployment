@@ -1,4 +1,4 @@
-name: Deploy site.zip to GitHub Pages (debug fixed)
+name: Deploy site.zip to GitHub Pages (no secrets)
 
 on:
   workflow_dispatch:
@@ -19,11 +19,10 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Runner info
+      - name: Check system info
         run: |
-          echo "USER: $(whoami)"
-          echo "PWD: $(pwd)"
-          echo "ROOT FILES:"
+          echo "Runner: $(uname -a)"
+          echo "Current directory: $(pwd)"
           ls -la
 
       - name: Ensure unzip is installed
@@ -33,92 +32,51 @@ jobs:
             sudo apt-get update -y
             sudo apt-get install -y unzip
           else
-            echo "unzip found: $(which unzip)"
+            echo "unzip already installed"
           fi
 
-      - name: Confirm site.zip exists and list contents
+      - name: Verify site.zip presence
         run: |
-          pwd
-          ls -la
           if [ ! -f "./site.zip" ]; then
-            echo "ERROR: site.zip not found at repository root. Commit site.zip to repo root or change workflow to download it."
-            exit 2
+            echo "❌ site.zip not found at repo root."
+            exit 1
           fi
-          echo "site.zip listing:"
-          unzip -l site.zip | sed -n '1,200p'
+          echo "✅ site.zip found."
+          unzip -l site.zip | head -n 20
 
-      - name: Extract site.zip -> public and debug
-        id: extract_debug
+      - name: Extract site.zip to public
         run: |
-          set -euo pipefail
           rm -rf public || true
           mkdir public
-          echo "Extracting site.zip -> public/"
-          unzip -oq site.zip -d public || { echo "unzip failed"; exit 3; }
+          unzip -oq site.zip -d public
 
-          echo "Top-level entries under public/:"
-          find public -mindepth 1 -maxdepth 1 -print -exec ls -la {} \; || true
+          echo "Contents of public/:"
+          find public -maxdepth 2 -print
 
-          echo "Search for index.html under public/:"
-          find public -type f -iname 'index.html' -print || true
-
-          # If index.html is at public root, done
-          if [ -f public/index.html ]; then
-            echo "index.html found at public root."
-            exit 0
-          fi
-
-          # If not, try to flatten a single top-level directory
-          mapfile -t items < <(find public -mindepth 1 -maxdepth 1 -type d -print)
-          count=${#items[@]}
-          echo "Top-level directory count: $count"
-          if [ "$count" -eq 1 ]; then
-            src="${items[0]}"
-            echo "Flattening contents of $src into public/"
-            mv "$src"/* public/ 2>/dev/null || true
-            mv "$src"/.[!.]* public/ 2>/dev/null || true || true
-            rmdir "$src" 2>/dev/null || true
-            echo "After flattening, listing public/:"
-            ls -la public | sed -n '1,200p'
-            if [ ! -f public/index.html ]; then
-              echo "ERROR: index.html still not found after flattening."
-              find public -maxdepth 4 -print
-              exit 4
-            fi
-          else
-            echo "Cannot auto-flatten (zero or multiple top-level directories). Showing tree:"
-            find public -maxdepth 4 -print
-            if [ ! -f public/index.html ]; then
-              echo "ERROR: No index.html at public root and cannot auto-flatten."
-              exit 5
+          # Handle nested folder (common zip issue)
+          if [ ! -f public/index.html ]; then
+            inner_dir=$(find public -mindepth 1 -maxdepth 1 -type d | head -n 1)
+            if [ -n "$inner_dir" ]; then
+              echo "Flattening nested folder: $inner_dir"
+              mv "$inner_dir"/* public/ 2>/dev/null || true
+              mv "$inner_dir"/.[!.]* public/ 2>/dev/null || true
+              rmdir "$inner_dir" 2>/dev/null || true
             fi
           fi
 
-      - name: (Conditional) write CNAME if CUSTOM_DOMAIN secret is set
-        if: ${{ secrets.CUSTOM_DOMAIN != '' }}
-        run: |
-          echo "CUSTOM_DOMAIN is set — writing CNAME"
-          echo "${{ secrets.CUSTOM_DOMAIN }}" > public/CNAME
-          echo "CNAME file content:"
-          cat public/CNAME || true
-          ls -la public | sed -n '1,200p'
-
-      - name: Final public check
-        run: |
-          echo "Final public listing:"
-          ls -la public | sed -n '1,200p'
-          if [ -f public/index.html ]; then
-            echo "OK: index.html present"
-          else
-            echo "MISSING index.html; aborting"
-            exit 6
+          if [ ! -f public/index.html ]; then
+            echo "❌ index.html not found after extraction."
+            find public -maxdepth 3 -print
+            exit 2
           fi
 
-      - name: Upload Pages artifact
+          echo "✅ index.html found in public/"
+
+      - name: Upload GitHub Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
           path: public
 
       - name: Deploy to GitHub Pages
-        id: deployment
+        id: deploy
         uses: actions/deploy-pages@v4
