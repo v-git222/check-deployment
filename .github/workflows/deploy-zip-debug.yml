@@ -1,4 +1,4 @@
-name: Deploy site.zip to GitHub Pages (debug)
+name: Deploy site.zip to GitHub Pages (debug fixed)
 
 on:
   workflow_dispatch:
@@ -23,90 +23,97 @@ jobs:
         run: |
           echo "USER: $(whoami)"
           echo "PWD: $(pwd)"
-          echo "ls -la root:"
+          echo "ROOT FILES:"
           ls -la
-          echo "----------"
 
       - name: Ensure unzip is available
         run: |
           if ! command -v unzip >/dev/null 2>&1; then
-            echo "unzip not found — installing"
+            echo "Installing unzip..."
             sudo apt-get update -y
             sudo apt-get install -y unzip
           else
-            echo "unzip found: $(which unzip) $(unzip -v | head -n1)"
+            echo "unzip present: $(which unzip)"
           fi
 
-      - name: Confirm site.zip exists and show zip listing
+      - name: Confirm site.zip exists and list its contents
         run: |
-          echo "Listing repo root for site.zip:"
-          ls -la || true
-          if [ ! -f ./site.zip ]; then
-            echo "ERROR: site.zip is NOT present at repository root. Aborting."
-            echo "Make sure site.zip is committed to repo root or update workflow to download it."
+          echo "Check current directory:"
+          pwd
+          ls -la
+          if [ ! -f "./site.zip" ]; then
+            echo "ERROR: site.zip not found at repo root."
             exit 2
           fi
-          echo "site.zip found. Contents:"
+          echo "site.zip contents:"
           unzip -l site.zip | sed -n '1,200p'
 
-      - name: Unzip into public and show tree
-        id: unzip
+      - name: Extract and debug public/
+        id: extract_debug
         run: |
+          set -euo pipefail
           rm -rf public || true
           mkdir public
           echo "Extracting site.zip -> public/"
           unzip -oq site.zip -d public || { echo "unzip failed"; exit 3; }
-          echo "Initial public listing (top 200):"
-          ls -la public | sed -n '1,200p'
-          echo "Find index.html files (anywhere under public):"
-          find public -type f -iname 'index.html' -print || true
-          echo "Find top-level entries under public:"
+
+          echo "Top-level entries under public/:"
           find public -mindepth 1 -maxdepth 1 -print -exec ls -la {} \; || true
 
-          # If index is not at public root, flatten if single top-level folder exists
+          echo "Search for index.html under public/:"
+          find public -type f -iname 'index.html' -print || true
+
+          # If index.html exists at root, we are done
           if [ -f public/index.html ]; then
-            echo "index.html exists at public root - no flatten needed"
-          else
-            # count top-level directories (excluding dotfiles)
-            items=(public/*)
-            count=${#items[@]}
-            echo "Top-level entry count under public = $count"
-            if [ $count -eq 1 ] && [ -d "${items[0]}" ]; then
-              echo "Single top-level directory detected: ${items[0]} — flattening its contents to public/"
-              shopt -s dotglob 2>/dev/null || true
-              mv -f "${items[0]}"/* public/ 2>/dev/null || true
-              mv -f "${items[0]}/".[!.]* public/ 2>/dev/null || true || true
-              rmdir "${items[0]}" || true
-              echo "After flattening:"
-              ls -la public | sed -n '1,200p'
-              if [ ! -f public/index.html ]; then
-                echo "ERROR: index.html still not found after flatten. Showing deeper tree:"
-                find public -maxdepth 4 -print
-                exit 4
-              fi
-            else
-              echo "No single top-level folder to flatten (or multiple items). Showing tree:"
+            echo "index.html found at public root."
+            exit 0
+          fi
+
+          # If not at root, check if there is exactly one top-level directory we can flatten
+          mapfile -t items < <(find public -mindepth 1 -maxdepth 1 -type d -print)
+          count=${#items[@]}
+          echo "Top-level directory count: $count"
+          if [ "$count" -eq 1 ]; then
+            src="${items[0]}"
+            echo "Flattening contents of $src into public/"
+            # Move non-hidden
+            mv "$src"/* public/ 2>/dev/null || true
+            # Move hidden (dot) files if present
+            mv "$src"/.[!.]* public/ 2>/dev/null || true || true
+            rmdir "$src" 2>/dev/null || true
+            echo "After flattening, listing public/:"
+            ls -la public | sed -n '1,200p'
+            if [ ! -f public/index.html ]; then
+              echo "ERROR: index.html still not found after flattening."
               find public -maxdepth 4 -print
-              if [ ! -f public/index.html ]; then
-                echo "ERROR: No index.html at root and cannot auto-flatten. Aborting."
-                exit 5
-              fi
+              exit 4
+            fi
+          else
+            echo "Cannot auto-flatten (zero or multiple top-level directories). Showing tree:"
+            find public -maxdepth 4 -print
+            if [ ! -f public/index.html ]; then
+              echo "ERROR: No index.html at public root and cannot auto-flatten."
+              exit 5
             fi
           fi
 
-      - name: Optional: write CNAME if secret set
+      - name: (Optional) write CNAME from secret
         if: ${{ secrets.CUSTOM_DOMAIN != '' }}
         run: |
-          echo "Writing CNAME..."
-          echo "${{ secrets.CUSTOM_DOMAIN }}" > public/CNAME
+          echo "Writing CNAME from secret..."
+          echo "${{ secrets.CUSTOM_DOMAIN }}" > public/CNAME || true
           ls -la public | sed -n '1,200p'
 
-      - name: Final public listing (sanity)
+      - name: Final public check
         run: |
-          echo "Final public/ top-level:"
+          echo "Final public top-level:"
           ls -la public | sed -n '1,200p'
-          echo "Ensure index.html present:"
-          test -f public/index.html && echo "OK: index.html exists" || (echo "MISSING index.html" && exit 6)
+          if [ -f public/index.html ]; then
+            echo "OK: index.html present"
+          else
+            echo "MISSING index.html; aborting"
+            exit 6
+          fi
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
