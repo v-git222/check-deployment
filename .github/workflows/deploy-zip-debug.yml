@@ -1,4 +1,4 @@
-name: Deploy landingpage.zip to GitHub Pages (robust)
+name: Deploy landingpagenew.zip to GitHub Pages (robust)
 
 on:
   workflow_dispatch:
@@ -31,33 +31,31 @@ jobs:
           echo "Python version:"
           python3 --version || python --version
           if ! command -v unzip >/dev/null 2>&1; then
-            echo "Installing unzip (just in case)"
             sudo apt-get update -y
             sudo apt-get install -y unzip
           fi
 
-      - name: Confirm landingpage.zip exists and show zip listing
+      - name: Confirm landingpagenew.zip exists and show zip listing
         run: |
-          if [ ! -f "./landingpage.zip" ]; then
-            echo "❌ ERROR: landingpage.zip not found at repo root."
-            echo "Commit landingpage.zip to the repo root before running this workflow."
+          if [ ! -f "./landingpagenew.zip" ]; then
+            echo "❌ ERROR: landingpagenew.zip not found at repo root."
             exit 2
           fi
-          echo "📦 landingpage.zip listing (head):"
-          unzip -l landingpage.zip | sed -n '1,200p' || true
+          echo "📦 landingpagenew.zip listing (head):"
+          unzip -l landingpagenew.zip | sed -n '1,200p' || true
 
-      - name: Extract landingpage.zip to public (robust Python extractor)
+      - name: Extract landingpagenew.zip to public (robust Python extractor)
         id: extract_python
         run: |
           python3 - <<'PY'
           import zipfile, os, sys, shutil
 
           root = os.getcwd()
-          zip_path = os.path.join(root, "landingpage.zip")
+          zip_path = os.path.join(root, "landingpagenew.zip")
           out_dir = os.path.join(root, "public")
 
           if not os.path.isfile(zip_path):
-              print("ERROR: landingpage.zip not found at repo root.")
+              print("ERROR: landingpagenew.zip not found at repo root.")
               sys.exit(2)
 
           if os.path.isdir(out_dir):
