@@ -14,41 +14,40 @@ jobs:
     environment: production
 
     steps:
-      - name: Checkout repo
+      - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Show runner info
+      - name: Runner info
         run: |
           echo "USER: $(whoami)"
           echo "PWD: $(pwd)"
           echo "ROOT FILES:"
           ls -la
 
-      - name: Ensure unzip is available
+      - name: Ensure unzip is installed
         run: |
           if ! command -v unzip >/dev/null 2>&1; then
             echo "Installing unzip..."
             sudo apt-get update -y
             sudo apt-get install -y unzip
           else
-            echo "unzip present: $(which unzip)"
+            echo "unzip found: $(which unzip)"
           fi
 
-      - name: Confirm site.zip exists and list its contents
+      - name: Confirm site.zip exists and list contents
         run: |
-          echo "Check current directory:"
           pwd
           ls -la
           if [ ! -f "./site.zip" ]; then
-            echo "ERROR: site.zip not found at repo root."
+            echo "ERROR: site.zip not found at repository root. Commit site.zip to repo root or change workflow to download it."
             exit 2
           fi
-          echo "site.zip contents:"
+          echo "site.zip listing:"
           unzip -l site.zip | sed -n '1,200p'
 
-      - name: Extract and debug public/
+      - name: Extract site.zip -> public and debug
         id: extract_debug
         run: |
           set -euo pipefail
@@ -63,22 +62,20 @@ jobs:
           echo "Search for index.html under public/:"
           find public -type f -iname 'index.html' -print || true
 
-          # If index.html exists at root, we are done
+          # If index.html is at public root, done
           if [ -f public/index.html ]; then
             echo "index.html found at public root."
             exit 0
           fi
 
-          # If not at root, check if there is exactly one top-level directory we can flatten
+          # If not, try to flatten a single top-level directory
           mapfile -t items < <(find public -mindepth 1 -maxdepth 1 -type d -print)
           count=${#items[@]}
           echo "Top-level directory count: $count"
           if [ "$count" -eq 1 ]; then
             src="${items[0]}"
             echo "Flattening contents of $src into public/"
-            # Move non-hidden
             mv "$src"/* public/ 2>/dev/null || true
-            # Move hidden (dot) files if present
             mv "$src"/.[!.]* public/ 2>/dev/null || true || true
             rmdir "$src" 2>/dev/null || true
             echo "After flattening, listing public/:"
@@ -97,16 +94,18 @@ jobs:
             fi
           fi
 
-      - name: (Optional) write CNAME from secret
+      - name: (Conditional) write CNAME if CUSTOM_DOMAIN secret is set
         if: ${{ secrets.CUSTOM_DOMAIN != '' }}
         run: |
-          echo "Writing CNAME from secret..."
-          echo "${{ secrets.CUSTOM_DOMAIN }}" > public/CNAME || true
+          echo "CUSTOM_DOMAIN is set — writing CNAME"
+          echo "${{ secrets.CUSTOM_DOMAIN }}" > public/CNAME
+          echo "CNAME file content:"
+          cat public/CNAME || true
           ls -la public | sed -n '1,200p'
 
       - name: Final public check
         run: |
-          echo "Final public top-level:"
+          echo "Final public listing:"
           ls -la public | sed -n '1,200p'
           if [ -f public/index.html ]; then
             echo "OK: index.html present"
